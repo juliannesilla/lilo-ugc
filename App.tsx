@@ -54,7 +54,14 @@ const AppContent = () => {
       setScrollProgress(Number(scroll));
     };
     window.addEventListener('scroll', handleScrollProgress);
-    return () => window.removeEventListener('scroll', handleScrollProgress);
+    
+    const handleOpenReport = () => setReportOpen(true);
+    window.addEventListener('open-report', handleOpenReport);
+    
+    return () => {
+      window.removeEventListener('scroll', handleScrollProgress);
+      window.removeEventListener('open-report', handleOpenReport);
+    };
   }, []);
 
   // Gallery State (Moved to state so Lightbox updates when edited)
@@ -267,19 +274,19 @@ const AppContent = () => {
                 alt="Hero Background" 
                 className="w-full h-full object-cover"
                 defaultObjectFit="cover"
-                forceCover={true}
+                controlsPosition="top"
             />
             {/* Gradient Overlay for Readability (Bottom Up) */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0a09] via-[#0c0a09]/40 to-transparent opacity-90"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0a09] via-[#0c0a09]/40 to-transparent opacity-90 pointer-events-none"></div>
             {/* Subtle Vignette */}
             <div className="absolute inset-0 bg-radial-gradient from-transparent to-black/30 pointer-events-none"></div>
         </div>
 
         {/* Layer 2: Editorial Content - OVERLAP FIX via Grid Column Padding and Constraints */}
-        <div className="relative z-10 w-full max-w-[1600px] mx-auto grid lg:grid-cols-12 gap-16 xl:gap-24 items-end">
+        <div className="relative z-10 w-full max-w-[1600px] mx-auto grid lg:grid-cols-12 gap-16 xl:gap-24 items-end pointer-events-none">
             
             {/* Left Column: Text Content - Restricted Width to prevent overlap */}
-            <div className="lg:col-span-7 xl:col-span-8 space-y-8 animate-in fade-in slide-in-from-bottom-10 duration-[1200ms] ease-premium relative z-20 max-w-3xl">
+            <div className="lg:col-span-7 xl:col-span-8 space-y-8 animate-in fade-in slide-in-from-bottom-10 duration-[1200ms] ease-premium relative z-20 max-w-3xl pointer-events-auto">
                 <div className="flex flex-wrap gap-4 items-center">
                     <Editable 
                         id="hero-badge" 
@@ -338,7 +345,7 @@ const AppContent = () => {
             </div>
 
             {/* Right Column: Social Proof / Metrics (Floating Glass Card) - In Flow */}
-            <div className="lg:col-span-5 xl:col-span-4 hidden lg:block pb-4 relative z-20">
+            <div className="lg:col-span-5 xl:col-span-4 hidden lg:block pb-4 relative z-20 pointer-events-auto">
                  <div className="bg-gradient-to-br from-[#1c1917]/95 to-[#292524]/95 backdrop-blur-xl border border-[#A08E7B]/30 p-10 rounded-2xl flex flex-col gap-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] hover:border-[#A08E7B]/60 transition-all duration-700 ease-premium group relative overflow-hidden">
                     {/* Subtle glow inside the box */}
                     <div className="absolute -top-24 -right-24 w-48 h-48 bg-[#A08E7B]/20 rounded-full blur-3xl pointer-events-none group-hover:bg-[#A08E7B]/30 transition-colors duration-700"></div>
@@ -355,7 +362,7 @@ const AppContent = () => {
                         <div className="flex -space-x-3 mb-6">
                             {[1,2,3].map(i => (
                                 <div key={i} className="w-14 h-14 rounded-xl border-2 border-[#1c1917] bg-stone-800 overflow-hidden relative transition-transform duration-700 ease-premium group-hover:scale-110 shadow-lg group-hover:-translate-y-1">
-                                    <img src={`https://images.unsplash.com/photo-15${i}7849845537-4d257902454a?w=100&h=100&fit=crop`} className="w-full h-full object-cover opacity-90" alt="Client" />
+                                    <img src={`https://images.unsplash.com/photo-15${i}7849845537-4d257902454a?w=100&h=100&fit=crop`} className="w-full h-full object-cover opacity-90" alt="Client" loading="lazy" />
                                 </div>
                             ))}
                             <div className="w-14 h-14 rounded-xl border-2 border-[#1c1917] bg-gradient-to-br from-[#A08E7B] to-[#8a7968] flex items-center justify-center text-sm font-black text-white z-10 transition-transform duration-700 ease-premium group-hover:scale-110 shadow-lg group-hover:-translate-y-1">
@@ -383,6 +390,7 @@ const AppContent = () => {
               alt="The Team - Julz and Lilo" 
               className="relative w-full aspect-[21/9] object-cover hover:scale-[1.01] transition-transform duration-[2000ms] ease-premium grayscale hover:grayscale-0"
               defaultObjectPosition="center"
+              forceCover={true}
             />
           </div>
 
@@ -424,6 +432,7 @@ const AppContent = () => {
                               alt="Julz" 
                               className="w-full h-full rounded-xl object-cover transition-transform duration-[2000ms] ease-premium group-hover:scale-105" 
                               defaultObjectPosition="top"
+                              forceCover={true}
                            />
                       </div>
 
@@ -495,6 +504,7 @@ const AppContent = () => {
                               alt="Lilo" 
                               className="w-full h-full rounded-xl object-cover transition-transform duration-[2000ms] ease-premium group-hover:scale-105" 
                               defaultObjectPosition="top"
+                              forceCover={true}
                            />
                       </div>
                       
@@ -601,21 +611,22 @@ const AppContent = () => {
           </div>
 
           {/* Videos Grid */}
-          <div className="grid md:grid-cols-3 gap-12">
+          <div className="grid md:grid-cols-3 gap-12 items-center">
             {[
-              { title: "<strong>UNBOXING + FIRST IMPRESSIONS</strong>", type: "<strong>AWARENESS</strong>", src: "https://images.unsplash.com/photo-1576201836106-db1758fd1c97?auto=format&fit=crop&w=400&q=80" },
-              { title: "<strong>PROBLEM / SOLUTION</strong>", type: "<strong>CONVERSION</strong>", src: "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=400&q=80" },
-              { title: "<strong>AESTHETIC ROUTINE</strong>", type: "<strong>RETENTION</strong>", src: "https://images.unsplash.com/photo-1510771463146-e89e6e86560e?auto=format&fit=crop&w=400&q=80" }
+              { title: "<strong>UNBOXING + FIRST IMPRESSIONS</strong>", type: "<strong>AWARENESS</strong>", src: "https://images.unsplash.com/photo-1576201836106-db1758fd1c97?auto=format&fit=crop&w=400&q=80", aspect: "aspect-[9/16]" },
+              { title: "<strong>PROBLEM / SOLUTION</strong>", type: "<strong>CONVERSION</strong>", src: "https://images.unsplash.com/photo-1544568100-847a948585b9?auto=format&fit=crop&w=400&q=80", aspect: "aspect-[9/16]" },
+              { title: "<strong>AESTHETIC ROUTINE</strong>", type: "<strong>RETENTION</strong>", src: "https://images.unsplash.com/photo-1510771463146-e89e6e86560e?auto=format&fit=crop&w=400&q=80", aspect: "aspect-[9/16]" }
             ].map((item, idx) => (
-              <div key={idx} className="group relative rounded-2xl overflow-hidden cursor-pointer shadow-2xl aspect-[9/16] border border-[#1c1917] hover:border-[#A08E7B] transition-all duration-[800ms] ease-premium hover:scale-[1.02]">
+              <div key={idx} className={`group relative rounded-2xl overflow-hidden cursor-pointer shadow-2xl ${item.aspect} border border-[#1c1917] hover:border-[#A08E7B] transition-all duration-[800ms] ease-premium hover:scale-[1.02]`}>
                 <EditableImage 
                   id={`portfolio-vid-${idx}`} 
                   src={item.src} 
                   alt="Portfolio Video" 
                   className="w-full h-full transition duration-[2000ms] ease-premium group-hover:scale-110" 
                   defaultObjectFit="cover"
+                  lazyLoad={true}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-700 ease-premium flex flex-col items-center justify-center backdrop-blur-[2px] pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 group-has-[video:not(:paused)]:!opacity-0 group-has-[video:not(:paused)]:pointer-events-none transition-all duration-700 ease-premium flex flex-col items-center justify-center backdrop-blur-[2px] pointer-events-none">
                   <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 transform scale-50 group-hover:scale-100 transition-transform duration-700 ease-premium delay-100 shadow-2xl">
                     <Play fill="white" className="text-white w-12 h-12 ml-1" />
                   </div>
@@ -637,8 +648,8 @@ const AppContent = () => {
             {galleryImages.map((img, i) => (
               <div 
                   key={img.id} 
-                  onClick={() => openLightbox(i)}
-                  className="aspect-[4/5] rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition duration-[800ms] ease-premium group border border-transparent hover:border-[#A08E7B] cursor-zoom-in relative hover:-translate-y-2"
+                  onClick={() => !isAdmin && openLightbox(i)}
+                  className={`aspect-[4/5] rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition duration-[800ms] ease-premium group border border-transparent ${isAdmin ? '' : 'hover:border-[#A08E7B] cursor-zoom-in hover:-translate-y-2'} relative`}
               >
                 <EditableImage 
                   id={`portfolio-photo-${img.id}`}
@@ -650,6 +661,7 @@ const AppContent = () => {
                   defaultObjectFit="cover"
                   defaultObjectPosition={img.align}
                   forceCover={true}
+                  lazyLoad={true}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-700 ease-premium flex flex-col items-center justify-center pointer-events-none">
                     <div className="transform scale-90 opacity-0 group-hover:scale-100 group-hover:opacity-100 transition-all duration-700 ease-premium flex flex-col items-center">
@@ -678,6 +690,53 @@ const AppContent = () => {
 
       {/* Modals */}
       <CopyRatingModal isOpen={reportOpen} onClose={() => setReportOpen(false)} />
+
+      {/* Lightbox */}
+      {lightboxOpen && (
+        <div className="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center animate-in fade-in duration-300">
+          <button 
+            onClick={closeLightbox}
+            className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors z-10"
+          >
+            <X size={32} />
+          </button>
+          
+          <button 
+            onClick={prevImage}
+            className="absolute left-6 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-colors z-10"
+          >
+            <ChevronLeft size={48} />
+          </button>
+          
+          <div className="relative w-full max-w-5xl max-h-[85vh] px-16 flex items-center justify-center">
+            {galleryImages[currentImageIndex].src.match(/\.(mp4|webm|ogg|mov)(\?.*)?(#.*)?$/i) || galleryImages[currentImageIndex].src.endsWith('#video') ? (
+              <video 
+                src={galleryImages[currentImageIndex].src} 
+                className="max-w-full max-h-[85vh] object-contain rounded-sm shadow-2xl"
+                autoPlay loop muted playsInline controls
+              />
+            ) : (
+              <img 
+                src={galleryImages[currentImageIndex].src} 
+                alt={galleryImages[currentImageIndex].title}
+                className="max-w-full max-h-[85vh] object-contain rounded-sm shadow-2xl"
+              />
+            )}
+            <div className="absolute bottom-[-40px] left-0 right-0 text-center">
+              <span className="text-white font-serif tracking-widest uppercase text-sm">
+                {galleryImages[currentImageIndex].title}
+              </span>
+            </div>
+          </div>
+
+          <button 
+            onClick={nextImage}
+            className="absolute right-6 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-colors z-10"
+          >
+            <ChevronRight size={48} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

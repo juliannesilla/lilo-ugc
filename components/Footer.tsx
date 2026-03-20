@@ -73,6 +73,12 @@ const Footer: React.FC = () => {
               <div className="flex gap-8">
                   <Editable id="footer-policy" tag="a" className="text-stone-500 dark:text-stone-400 text-xs tracking-widest uppercase font-bold hover:text-[#1c1917] dark:hover:text-white transition-colors cursor-pointer" defaultContent="PRIVACY POLICY" />
                   <Editable id="footer-terms" tag="a" className="text-stone-500 dark:text-stone-400 text-xs tracking-widest uppercase font-bold hover:text-[#1c1917] dark:hover:text-white transition-colors cursor-pointer" defaultContent="TERMS OF SERVICE" />
+                  <button onClick={() => {
+                    const event = new CustomEvent('open-report');
+                    window.dispatchEvent(event);
+                  }} className="text-stone-500 dark:text-stone-400 text-xs tracking-widest uppercase font-bold hover:text-[#1c1917] dark:hover:text-white transition-colors cursor-pointer">
+                    COPY AUDIT
+                  </button>
               </div>
           </div>
       </div>
