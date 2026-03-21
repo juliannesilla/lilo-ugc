@@ -141,12 +141,13 @@ export const Editable: React.FC<EditableProps> = ({
       style: {
         ...style,
         ...styles,
-        transform: `translate(${position.x}px, ${position.y}px)`,
+        transform: (position.x || position.y) ? `translate(${position.x}px, ${position.y}px)` : undefined,
+        transition: isDragging ? 'none' : undefined,
         outline: isDragging ? '2px solid #A08E7B' : '2px dashed #A08E7B',
         outlineOffset: '4px',
         cursor: isComplexChildren ? 'default' : 'text',
         resize: 'both',
-        overflow: 'hidden',
+        overflow: 'auto',
         display: styles.display || 'inline-block', // Ensure resize works
       }
     };

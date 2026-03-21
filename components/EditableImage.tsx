@@ -105,6 +105,8 @@ interface EditableImageProps {
   defaultObjectFit?: 'cover' | 'contain';
   defaultObjectPosition?: 'center' | 'top' | 'bottom';
   forceCover?: boolean;
+  lazyLoad?: boolean;
+  controlsPosition?: 'center' | 'top';
 }
 
 export const EditableImage: React.FC<EditableImageProps> = ({ 
@@ -116,13 +118,16 @@ export const EditableImage: React.FC<EditableImageProps> = ({
   onBatchUpload,
   defaultObjectFit = 'cover',
   defaultObjectPosition = 'center',
-  forceCover = false
+  forceCover = false,
+  lazyLoad = false,
+  controlsPosition = 'center'
 }) => {
   const { isAdmin } = useAdmin();
   const [currentSrc, setCurrentSrc] = useState(defaultSrc);
   const [error, setError] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'processing' | 'saving' | 'success' | 'error'>('idle');
+  const [isPersisted, setIsPersisted] = useState(false);
   
   const [styles, setStyles] = useState<React.CSSProperties>({});
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -136,6 +141,11 @@ export const EditableImage: React.FC<EditableImageProps> = ({
 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
+  const positionRef = useRef(position);
+
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
 
   // Persistence Key Helpers
   const keys = {
@@ -165,20 +175,27 @@ export const EditableImage: React.FC<EditableImageProps> = ({
             const mappingType = localStorage.getItem(keys.map);
             if (mappingType === 'external') {
                 const externalUrl = localStorage.getItem(`${keys.map}_url`);
-                if (externalUrl && isMounted) setCurrentSrc(externalUrl);
+                if (externalUrl && isMounted) {
+                    setCurrentSrc(externalUrl);
+                    setIsPersisted(false);
+                }
             } else if (mappingType === 'idb') {
                 const blob = await getBlobFromDB(id);
                 if (blob && isMounted) {
-                    const url = URL.createObjectURL(blob);
-                    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+                    const isVideo = blob.type.startsWith('video/');
+                    const url = URL.createObjectURL(blob) + (isVideo ? '#video' : '#image');
+                    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current.split('#')[0]);
                     blobUrlRef.current = url;
                     setCurrentSrc(url);
+                    setIsPersisted(true);
                     onUpdate?.(url);
                 } else if (isMounted) {
                     setCurrentSrc(defaultSrc);
+                    setIsPersisted(false);
                 }
             } else if (isMounted) {
                 setCurrentSrc(defaultSrc);
+                setIsPersisted(false);
             }
         } catch (e) {
             console.error("Media restoration failed", e);
@@ -188,47 +205,56 @@ export const EditableImage: React.FC<EditableImageProps> = ({
     };
     initMedia();
     return () => { isMounted = false; };
-  }, [id, defaultSrc]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // Reactive update for parent-controlled source changes
   useEffect(() => {
     if (isInitialLoad.current) return;
-    const mappingType = localStorage.getItem(keys.map);
+    const mappingType = localStorage.getItem(`media_v5_${id}`);
     if (!mappingType) {
         setCurrentSrc(defaultSrc);
     }
-  }, [defaultSrc]);
+  }, [defaultSrc, id]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const processFiles = async (files: File[]) => {
     if (!files.length) return;
 
-    setIsProcessing(true);
-    setSaveStatus('saving');
+    setUploadState('uploading');
     setError(false);
 
     try {
+        // Small delay to show uploading state smoothly
+        await new Promise(resolve => setTimeout(resolve, 400));
+        setUploadState('processing');
+
         // Process sequentially or in parallel
         const processedBlobs = await Promise.all(files.map(async (file: File) => {
             const isVideo = file.type.startsWith('video/');
-            return isVideo ? file : await processImageFile(file);
+            const blob = isVideo ? file : await processImageFile(file);
+            return { blob, isVideo };
         }));
         
         // Generate URLs for all blobs
-        const previewUrls = processedBlobs.map(blob => URL.createObjectURL(blob));
+        const previewUrls = processedBlobs.map(({blob, isVideo}) => URL.createObjectURL(blob) + (isVideo ? '#video' : '#image'));
         
         // For the current component, we just take the first one
-        const processedBlob = processedBlobs[0];
+        const processedBlob = processedBlobs[0].blob;
         const previewUrl = previewUrls[0];
         
         // Instant Preview
-        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current.split('#')[0]);
         blobUrlRef.current = previewUrl;
         setCurrentSrc(previewUrl);
+        
+        setUploadState('saving');
         
         // Permanent Persistence
         await saveBlobToDB(processedBlob, id);
         localStorage.setItem(keys.map, 'idb');
+        setIsPersisted(true);
         
         onUpdate?.(previewUrl);
         
@@ -237,15 +263,44 @@ export const EditableImage: React.FC<EditableImageProps> = ({
             onBatchUpload(previewUrls);
         }
         
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
+        setUploadState('success');
+        setTimeout(() => setUploadState('idle'), 2500);
     } catch (err: any) {
         console.error("Critical upload failure", err);
-        setSaveStatus('error');
+        setUploadState('error');
         setError(true);
-    } finally {
-        setIsProcessing(false);
+        setTimeout(() => setUploadState('idle'), 3500);
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    await processFiles(files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    
+    const files = Array.from(e.dataTransfer.files) as File[];
+    const validFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
+    await processFiles(validFiles);
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
@@ -255,6 +310,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
         setCurrentSrc(url);
         localStorage.setItem(keys.map, 'external');
         localStorage.setItem(`${keys.map}_url`, url);
+        setIsPersisted(false);
         onUpdate?.(url);
     }
   };
@@ -274,10 +330,11 @@ export const EditableImage: React.FC<EditableImageProps> = ({
          const nx = e.clientX - dragStart.current.x;
          const ny = e.clientY - dragStart.current.y;
          setPosition({ x: nx, y: ny });
+         positionRef.current = { x: nx, y: ny };
     }
     const upHandler = () => {
         setIsDragging(false);
-        localStorage.setItem(keys.pos, JSON.stringify(position));
+        localStorage.setItem(keys.pos, JSON.stringify(positionRef.current));
         window.removeEventListener('mousemove', moveHandler);
         window.removeEventListener('mouseup', upHandler);
     }
@@ -287,33 +344,35 @@ export const EditableImage: React.FC<EditableImageProps> = ({
       window.removeEventListener('mousemove', moveHandler);
       window.removeEventListener('mouseup', upHandler);
     };
-  }, [isDragging, position, keys.pos]);
+  }, [isDragging, keys.pos]);
 
-  const RenderMedia = ({ customClass }: { customClass: string }) => {
-      const style = { 
-          objectFit: forceCover ? 'cover' : objectFit,
-          objectPosition: objectPosition === 'top' ? 'top center' : objectPosition === 'bottom' ? 'bottom center' : 'center center'
-      } as React.CSSProperties;
+  const mediaStyle = { 
+      objectFit: forceCover ? 'cover' : objectFit,
+      objectPosition: objectPosition === 'top' ? 'top center' : objectPosition === 'bottom' ? 'bottom center' : 'center center'
+  } as React.CSSProperties;
 
+  const renderMediaContent = (customClass: string) => {
       if (error) {
           return (
-            <div className={`w-full h-full bg-stone-200 flex flex-col items-center justify-center text-stone-400 p-4 text-center ${customClass}`}>
-                <AlertCircle size={32} className="mb-2" />
-                <span className="text-[10px] font-bold uppercase tracking-widest leading-tight">Persistence Slot Failed</span>
+            <div className={`w-full h-full bg-stone-200 flex flex-col items-center justify-center text-stone-500 p-6 text-center ${customClass}`}>
+                <AlertCircle size={40} className="mb-3 text-red-400" />
+                <span className="text-sm font-bold uppercase tracking-widest leading-tight text-stone-800 mb-2">Upload Failed</span>
+                <p className="text-xs max-w-[200px] leading-relaxed">We couldn't save your media. Please check your connection and try dropping the file again.</p>
             </div>
           );
       }
 
-      const isVid = currentSrc?.match(/\.(mp4|webm|ogg|mov|blob)$/i) || currentSrc?.startsWith('blob:video') || (currentSrc?.startsWith('blob:') && !currentSrc?.includes('image'));
+      const isVid = currentSrc?.match(/\.(mp4|webm|ogg|mov)(\?.*)?(#.*)?$/i) || currentSrc?.endsWith('#video');
       
       if (isVid) {
           return (
             <video 
+                ref={videoRef}
                 key={currentSrc}
                 src={currentSrc} 
                 className={`${customClass} bg-black`} 
-                style={style}
-                autoPlay loop muted playsInline 
+                style={mediaStyle}
+                loop muted playsInline controls
                 onError={() => setError(true)}
             />
           );
@@ -324,7 +383,8 @@ export const EditableImage: React.FC<EditableImageProps> = ({
             src={currentSrc} 
             alt={alt} 
             className={customClass} 
-            style={style} 
+            style={mediaStyle} 
+            loading={lazyLoad ? 'lazy' : undefined}
             onError={() => setError(true)}
         />
       );
@@ -334,37 +394,62 @@ export const EditableImage: React.FC<EditableImageProps> = ({
     return (
       <div 
         ref={containerRef}
-        className={`${className} group relative bg-stone-100 overflow-hidden`} 
+        className={`${className} group relative bg-stone-100 overflow-hidden ${isDraggingOver ? 'ring-4 ring-[#A08E7B] ring-inset' : ''}`} 
         style={{ 
           ...styles, 
-          transform: `translate(${position.x}px, ${position.y}px)`,
+          transform: (position.x || position.y) ? `translate(${position.x}px, ${position.y}px)` : undefined,
+          transition: isDragging ? 'none' : undefined,
           outline: isDragging ? '3px solid #A08E7B' : '3px dashed #A08E7B', 
           outlineOffset: '-3px', 
-          resize: 'both', 
-          display: 'block' 
+          resize: 'both'
         }}
         onMouseUp={handleResize}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
-        <div className="w-full h-full pointer-events-none" style={{ opacity: isProcessing ? 0.3 : 1 }}>
-            <RenderMedia customClass="w-full h-full" />
+        <div className={`w-full h-full pointer-events-none transition-all duration-700 ease-in-out ${uploadState !== 'idle' && uploadState !== 'success' && uploadState !== 'error' ? 'opacity-40 scale-[0.98] blur-[2px]' : 'opacity-100 scale-100 blur-0'}`}>
+            {renderMediaContent("w-full h-full")}
         </div>
-        
-        {isProcessing && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/20 z-50 backdrop-blur-sm">
-                <Loader2 className="animate-spin text-white mb-2" size={32} />
-                <span className="text-white text-[10px] font-bold uppercase tracking-widest">Processing Media...</span>
+
+        {isDraggingOver && (
+          <div className="absolute inset-0 bg-[#A08E7B]/20 backdrop-blur-sm z-50 flex items-center justify-center pointer-events-none">
+            <div className="bg-white/90 px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">
+              <Upload size={20} className="text-[#A08E7B] animate-bounce" />
+              <span className="text-[#1c1917] font-bold tracking-widest uppercase text-sm">Drop to replace</span>
             </div>
+          </div>
         )}
-
-        <div className="absolute top-2 right-2 flex items-center gap-2 z-50">
-            {saveStatus === 'saved' && (
-                <div className="bg-green-500 text-white px-2 py-1 rounded-md flex items-center gap-1 shadow-lg animate-in fade-in zoom-in duration-300">
-                    <Check size={12} /> <span className="text-[10px] font-bold uppercase">Stored</span>
+        
+        <div className="absolute top-3 right-3 flex items-center gap-2 z-50">
+            <div className={`transition-all duration-500 ease-in-out overflow-hidden rounded-md shadow-lg flex items-center ${
+                uploadState === 'idle' && isPersisted ? 'bg-stone-800/60 backdrop-blur-md text-white/90 border border-white/10 opacity-100' :
+                uploadState === 'idle' && !isPersisted ? 'opacity-0 scale-95 pointer-events-none' :
+                uploadState === 'success' ? 'bg-emerald-500/90 backdrop-blur-md text-white border border-emerald-400/50 opacity-100 scale-100' :
+                uploadState === 'error' ? 'bg-red-500/90 backdrop-blur-md text-white border border-red-400/50 opacity-100 scale-100' :
+                'bg-blue-500/90 backdrop-blur-md text-white border border-blue-400/50 opacity-100 scale-100'
+            }`}>
+                <div className="px-3 py-1.5 flex items-center gap-2">
+                    {uploadState === 'uploading' && <Upload size={12} className="animate-bounce" />}
+                    {uploadState === 'processing' && <Loader2 size={12} className="animate-spin" />}
+                    {uploadState === 'saving' && <Save size={12} className="animate-pulse" />}
+                    {uploadState === 'success' && <Check size={12} />}
+                    {uploadState === 'error' && <AlertCircle size={12} />}
+                    {uploadState === 'idle' && isPersisted && <Save size={10} />}
+                    
+                    <span className="text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
+                        {uploadState === 'uploading' && 'Uploading...'}
+                        {uploadState === 'processing' && 'Processing...'}
+                        {uploadState === 'saving' && 'Saving...'}
+                        {uploadState === 'success' && 'Stored in DB'}
+                        {uploadState === 'error' && 'Error'}
+                        {uploadState === 'idle' && isPersisted && 'In DB'}
+                    </span>
                 </div>
-            )}
+            </div>
         </div>
 
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 z-40 p-2 pointer-events-none">
+        <div className={`absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center ${controlsPosition === 'top' ? 'justify-start pt-32' : 'justify-center'} gap-2 z-40 p-2 pointer-events-none`}>
             <div className="flex gap-2 pointer-events-auto">
                 <button onClick={() => fileInputRef.current?.click()} className="bg-[#A08E7B] text-white px-3 py-1.5 rounded-md font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 hover:brightness-110 active:scale-95 transition">
                     <Upload size={12} /> Replace
@@ -412,7 +497,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
 
   return (
       <div className={`${className} bg-stone-100 overflow-hidden`} style={{ ...styles, transform: (position.x || position.y) ? `translate(${position.x}px, ${position.y}px)` : undefined, position: (position.x || position.y) ? 'relative' : undefined }}>
-        <RenderMedia customClass="w-full h-full" />
+        {renderMediaContent("w-full h-full")}
       </div>
   );
 };
