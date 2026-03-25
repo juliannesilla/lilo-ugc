@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "PortfolioContent": {
+      "title": "Portfolio Content",
+      "description": "Content for an editable block (text or media)",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "media"] },
+        "content": { "type": "string" },
+        "src": { "type": "string" },
+        "styles": { "type": "object" },
+        "position": { "type": "object" },
+        "objectFit": { "type": "string" },
+        "objectPosition": { "type": "string" }
+      },
+      "required": ["type"]
+    }
+  },
+  "firestore": {
+    "/portfolio_content/{id}": {
+      "schema": { "$ref": "#/entities/PortfolioContent" },
+      "description": "Stores all editable content blocks"
+    }
+  }
+}

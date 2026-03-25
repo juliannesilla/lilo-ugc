@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: portfolio_content
+    // Document ID: string (e.g., 'hero-title', 'portfolio-photo-1')
+    // Fields:
+    //   - type: string (required, 'text' or 'media')
+    //   - content: string (optional, for text)
+    //   - src: string (optional, for media)
+    //   - styles: map (optional)
+    //   - position: map (optional)
+    //   - objectFit: string (optional)
+    //   - objectPosition: string (optional)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.email == "julzsilla@gmail.com" && request.auth.token.email_verified == true;
+    }
+
+    function isValidContent() {
+      let data = request.resource.data;
+      return data.keys().hasAny(['type']) &&
+             data.type in ['text', 'media'] &&
+             (!('content' in data) || data.content is string) &&
+             (!('src' in data) || data.src is string) &&
+             (!('styles' in data) || data.styles is map) &&
+             (!('position' in data) || data.position is map) &&
+             (!('objectFit' in data) || data.objectFit is string) &&
+             (!('objectPosition' in data) || data.objectPosition is string);
+    }
+
+    match /portfolio_content/{id} {
+      // Anyone can read the portfolio content
+      allow read: if true;
+      // Only the admin can create/update/delete
+      allow create: if isAdmin() && isValidContent();
+      allow update: if isAdmin() && isValidContent();
+      allow delete: if isAdmin();
+    }
+  }
+}
