@@ -1,10 +1,24 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Editable } from './Editable';
 import { Instagram, Mail, Lock } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 
 const Footer: React.FC = () => {
   const { toggleAdmin, isAdmin } = useAdmin();
+  
+  // Secret keyboard shortcut for Admin Login (Ctrl + Shift + A)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        toggleAdmin();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleAdmin]);
+
   const handleScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
     if (targetId === '#') {
@@ -62,13 +76,15 @@ const Footer: React.FC = () => {
           <div className="mt-20 pt-10 border-t border-[#1c1917]/10 dark:border-white/5 flex flex-col md:flex-row justify-between items-center gap-6">
               <div className="flex items-center gap-6">
                 <Editable id="footer-copy" tag="p" className="text-stone-500 dark:text-stone-400 text-xs tracking-widest uppercase font-bold" defaultContent="&copy; 2024 JULZ + LILO. ALL RIGHTS RESERVED." />
-                <button 
-                  onClick={toggleAdmin}
-                  className="text-stone-400 dark:text-stone-500 hover:text-[#A08E7B] dark:hover:text-[#A08E7B] transition-colors flex items-center gap-2 text-[10px] tracking-[0.2em] uppercase font-bold"
-                >
-                  <Lock size={10} />
-                  {isAdmin ? 'Exit Admin' : 'Admin Login'}
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={toggleAdmin}
+                    className="text-stone-400 dark:text-stone-500 hover:text-[#A08E7B] dark:hover:text-[#A08E7B] transition-colors flex items-center gap-2 text-[10px] tracking-[0.2em] uppercase font-bold"
+                  >
+                    <Lock size={10} />
+                    Exit Admin
+                  </button>
+                )}
               </div>
               <div className="flex gap-8">
                   <Editable id="footer-policy" tag="a" className="text-stone-500 dark:text-stone-400 text-xs tracking-widest uppercase font-bold hover:text-[#1c1917] dark:hover:text-white transition-colors cursor-pointer" defaultContent="PRIVACY POLICY" />

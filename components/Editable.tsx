@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { Move } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 interface EditableProps {
   id: string;
@@ -21,7 +23,7 @@ export const Editable: React.FC<EditableProps> = ({
   placeholder,
   style
 }) => {
-  const { isAdmin } = useAdmin();
+  const { isAdmin, isAuthReady } = useAdmin();
   const [content, setContent] = useState<string>(defaultContent || (typeof children === 'string' ? children : ''));
   const [styles, setStyles] = useState<React.CSSProperties>({});
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -33,20 +35,26 @@ export const Editable: React.FC<EditableProps> = ({
 
   // Load saved state on mount
   useEffect(() => {
-    const savedData = localStorage.getItem(`edit_${id}`);
-    if (savedData) {
-      try {
-        const parsed = JSON.parse(savedData);
-        if (parsed.content) setContent(parsed.content);
-        if (parsed.styles) setStyles(parsed.styles);
-        if (parsed.position) setPosition(parsed.position);
-      } catch (e) {
-        console.error("Failed to load editable content", e);
+    if (!isAuthReady) return;
+
+    const docRef = doc(db, 'portfolio_content', id);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.type === 'text') {
+          if (data.content !== undefined) setContent(data.content);
+          if (data.styles) setStyles(data.styles);
+          if (data.position) setPosition(data.position);
+        }
+      } else if (defaultContent) {
+        setContent(defaultContent);
       }
-    } else if (defaultContent) {
-      setContent(defaultContent);
-    }
-  }, [id, defaultContent]);
+    }, (error) => {
+      console.error("Firestore Error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [id, defaultContent, isAuthReady]);
 
   // Drag Event Handlers
   const handleDragStart = (e: React.MouseEvent) => {
@@ -60,7 +68,6 @@ export const Editable: React.FC<EditableProps> = ({
   useEffect(() => {
     if (!isDragging) return;
 
-    // We need to track the position in a local variable for the cleanup save to work reliably without re-binding the listener constantly
     let currentX = position.x;
     let currentY = position.y;
 
@@ -83,7 +90,7 @@ export const Editable: React.FC<EditableProps> = ({
       window.removeEventListener('mousemove', moveHandler);
       window.removeEventListener('mouseup', upHandler);
     };
-  }, [isDragging]); // Re-binds when dragging starts
+  }, [isDragging, content, styles]);
 
   // Text & Resize Handlers
   const handleBlur = (e: React.FormEvent<HTMLElement>) => {
@@ -95,15 +102,24 @@ export const Editable: React.FC<EditableProps> = ({
   const handleResize = () => {
     if (elementRef.current) {
       const { width, height } = elementRef.current.style;
-      // We only want to save explicit styles
       const newStyles = { ...styles, width, height };
       setStyles(newStyles);
       saveState(content, newStyles, position);
     }
   };
 
-  const saveState = (c: string, s: React.CSSProperties, p: {x: number, y: number}) => {
-    localStorage.setItem(`edit_${id}`, JSON.stringify({ content: c, styles: s, position: p }));
+  const saveState = async (c: string, s: React.CSSProperties, p: {x: number, y: number}) => {
+    if (!isAdmin) return;
+    try {
+      await setDoc(doc(db, 'portfolio_content', id), {
+        type: 'text',
+        content: c,
+        styles: s,
+        position: p
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error saving to Firestore:", error);
+    }
   };
 
   const Tag = tag as any;

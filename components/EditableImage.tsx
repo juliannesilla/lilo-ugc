@@ -1,55 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { Image as ImageIcon, Video, Upload, Link, Move, Maximize, Minimize, ArrowUp, ArrowDown, AlignCenter, AlertCircle, Loader2, Check, Save } from 'lucide-react';
-
-// --- IndexedDB Utilities ---
-const DB_NAME = 'JulzLiloPortfolioDB';
-const STORE_NAME = 'media_blobs';
-const DB_VERSION = 5; // Incremented for new persistence engine
-
-const openDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-        reject('IndexedDB not supported');
-        return;
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = (event) => resolve((event.target as IDBOpenDBRequest).result);
-    request.onerror = (event) => reject((event.target as IDBOpenDBRequest).error);
-  });
-};
-
-const saveBlobToDB = async (blob: Blob, slotId: string): Promise<void> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        const req = store.put(blob, slotId);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-    });
-};
-
-const getBlobFromDB = async (slotId: string): Promise<Blob | null> => {
-    try {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const store = tx.objectStore(STORE_NAME);
-            const req = store.get(slotId);
-            req.onsuccess = () => resolve(req.result || null);
-            req.onerror = () => reject(req.error);
-        });
-    } catch (e) {
-        return null;
-    }
-};
+import { db, storage } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 // Process Image (Resize & Compress)
 const processImageFile = (file: File): Promise<Blob> => {
@@ -122,7 +76,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
   lazyLoad = false,
   controlsPosition = 'center'
 }) => {
-  const { isAdmin } = useAdmin();
+  const { isAdmin, isAuthReady } = useAdmin();
   const [currentSrc, setCurrentSrc] = useState(defaultSrc);
   const [error, setError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -137,87 +91,52 @@ export const EditableImage: React.FC<EditableImageProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const blobUrlRef = useRef<string | null>(null);
-  const isInitialLoad = useRef(true);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
-  const positionRef = useRef(position);
 
+  // Sync state with Firestore on mount
   useEffect(() => {
-    positionRef.current = position;
-  }, [position]);
+    if (!isAuthReady) return;
 
-  // Persistence Key Helpers
-  const keys = {
-    map: `media_v5_${id}`,
-    style: `style_${id}`,
-    pos: `pos_${id}`,
-    fit: `fit_${id}`,
-    objpos: `objpos_${id}`
-  };
-
-  // Sync state with reliable IndexedDB storage on mount
-  useEffect(() => {
-    let isMounted = true;
-    const initMedia = async () => {
-        try {
-            const sStyles = localStorage.getItem(keys.style);
-            const sPos = localStorage.getItem(keys.pos);
-            const sFit = localStorage.getItem(keys.fit);
-            const sObjPos = localStorage.getItem(keys.objpos);
-            
-            if (sStyles) setStyles(JSON.parse(sStyles));
-            if (sPos) setPosition(JSON.parse(sPos));
-            if (sFit) setObjectFit(sFit as 'cover' | 'contain');
-            if (sObjPos) setObjectPosition(sObjPos as 'center' | 'top' | 'bottom');
-
-            // Load Atomic Mapping
-            const mappingType = localStorage.getItem(keys.map);
-            if (mappingType === 'external') {
-                const externalUrl = localStorage.getItem(`${keys.map}_url`);
-                if (externalUrl && isMounted) {
-                    setCurrentSrc(externalUrl);
-                    setIsPersisted(false);
-                }
-            } else if (mappingType === 'idb') {
-                const blob = await getBlobFromDB(id);
-                if (blob && isMounted) {
-                    const isVideo = blob.type.startsWith('video/');
-                    const url = URL.createObjectURL(blob) + (isVideo ? '#video' : '#image');
-                    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current.split('#')[0]);
-                    blobUrlRef.current = url;
-                    setCurrentSrc(url);
-                    setIsPersisted(true);
-                    onUpdate?.(url);
-                } else if (isMounted) {
-                    setCurrentSrc(defaultSrc);
-                    setIsPersisted(false);
-                }
-            } else if (isMounted) {
-                setCurrentSrc(defaultSrc);
-                setIsPersisted(false);
-            }
-        } catch (e) {
-            console.error("Media restoration failed", e);
-        } finally {
-            isInitialLoad.current = false;
+    const docRef = doc(db, 'portfolio_content', id);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.type === 'media') {
+          if (data.src) {
+            setCurrentSrc(data.src);
+            setIsPersisted(true);
+          }
+          if (data.styles) setStyles(data.styles);
+          if (data.position) setPosition(data.position);
+          if (data.objectFit) setObjectFit(data.objectFit);
+          if (data.objectPosition) setObjectPosition(data.objectPosition);
         }
-    };
-    initMedia();
-    return () => { isMounted = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  // Reactive update for parent-controlled source changes
-  useEffect(() => {
-    if (isInitialLoad.current) return;
-    const mappingType = localStorage.getItem(`media_v5_${id}`);
-    if (!mappingType) {
+      } else {
         setCurrentSrc(defaultSrc);
-    }
-  }, [defaultSrc, id]);
+        setIsPersisted(false);
+      }
+    }, (error) => {
+      console.error("Firestore Error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [id, defaultSrc, isAuthReady]);
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const saveToFirestore = async (updates: any) => {
+    if (!isAdmin) return;
+    try {
+      await setDoc(doc(db, 'portfolio_content', id), {
+        type: 'media',
+        ...updates
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error saving to Firestore:", error);
+    }
+  };
 
   const processFiles = async (files: File[]) => {
     if (!files.length) return;
@@ -226,41 +145,36 @@ export const EditableImage: React.FC<EditableImageProps> = ({
     setError(false);
 
     try {
-        // Small delay to show uploading state smoothly
         await new Promise(resolve => setTimeout(resolve, 400));
         setUploadState('processing');
 
-        // Process sequentially or in parallel
         const processedBlobs = await Promise.all(files.map(async (file: File) => {
             const isVideo = file.type.startsWith('video/');
             const blob = isVideo ? file : await processImageFile(file);
-            return { blob, isVideo };
+            return { blob, isVideo, file };
         }));
-        
-        // Generate URLs for all blobs
-        const previewUrls = processedBlobs.map(({blob, isVideo}) => URL.createObjectURL(blob) + (isVideo ? '#video' : '#image'));
-        
-        // For the current component, we just take the first one
-        const processedBlob = processedBlobs[0].blob;
-        const previewUrl = previewUrls[0];
-        
-        // Instant Preview
-        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current.split('#')[0]);
-        blobUrlRef.current = previewUrl;
-        setCurrentSrc(previewUrl);
         
         setUploadState('saving');
         
-        // Permanent Persistence
-        await saveBlobToDB(processedBlob, id);
-        localStorage.setItem(keys.map, 'idb');
+        const uploadedUrls = await Promise.all(processedBlobs.map(async ({blob, isVideo, file}) => {
+            const ext = isVideo ? file.name.split('.').pop() : 'jpg';
+            const filename = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+            const storageRef = ref(storage, `portfolio/${filename}`);
+            const uploadTask = await uploadBytesResumable(storageRef, blob);
+            const downloadUrl = await getDownloadURL(uploadTask.ref);
+            return downloadUrl + (isVideo ? '#video' : '#image');
+        }));
+        
+        const previewUrl = uploadedUrls[0];
+        
+        setCurrentSrc(previewUrl);
+        await saveToFirestore({ src: previewUrl });
         setIsPersisted(true);
         
         onUpdate?.(previewUrl);
         
-        // If batch upload handler is provided, pass all URLs
-        if (onBatchUpload && previewUrls.length > 1) {
-            onBatchUpload(previewUrls);
+        if (onBatchUpload && uploadedUrls.length > 1) {
+            onBatchUpload(uploadedUrls);
         }
         
         setUploadState('success');
@@ -308,9 +222,8 @@ export const EditableImage: React.FC<EditableImageProps> = ({
     const url = window.prompt("Enter external media URL:", currentSrc);
     if (url) {
         setCurrentSrc(url);
-        localStorage.setItem(keys.map, 'external');
-        localStorage.setItem(`${keys.map}_url`, url);
-        setIsPersisted(false);
+        saveToFirestore({ src: url });
+        setIsPersisted(true);
         onUpdate?.(url);
     }
   };
@@ -320,21 +233,23 @@ export const EditableImage: React.FC<EditableImageProps> = ({
       const { width, height } = containerRef.current.style;
       const newStyles = { ...styles, width, height };
       setStyles(newStyles);
-      localStorage.setItem(keys.style, JSON.stringify(newStyles));
+      saveToFirestore({ styles: newStyles });
     }
   };
 
   useEffect(() => {
     if (!isDragging) return;
+    let currentX = position.x;
+    let currentY = position.y;
+
     const moveHandler = (e: MouseEvent) => {
-         const nx = e.clientX - dragStart.current.x;
-         const ny = e.clientY - dragStart.current.y;
-         setPosition({ x: nx, y: ny });
-         positionRef.current = { x: nx, y: ny };
+         currentX = e.clientX - dragStart.current.x;
+         currentY = e.clientY - dragStart.current.y;
+         setPosition({ x: currentX, y: currentY });
     }
     const upHandler = () => {
         setIsDragging(false);
-        localStorage.setItem(keys.pos, JSON.stringify(positionRef.current));
+        saveToFirestore({ position: { x: currentX, y: currentY } });
         window.removeEventListener('mousemove', moveHandler);
         window.removeEventListener('mouseup', upHandler);
     }
@@ -344,7 +259,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
       window.removeEventListener('mousemove', moveHandler);
       window.removeEventListener('mouseup', upHandler);
     };
-  }, [isDragging, keys.pos]);
+  }, [isDragging, position.x, position.y]);
 
   const mediaStyle = { 
       objectFit: forceCover ? 'cover' : objectFit,
@@ -465,16 +380,16 @@ export const EditableImage: React.FC<EditableImageProps> = ({
                     <button onClick={() => { 
                         const nextFit = objectFit === 'cover' ? 'contain' : 'cover';
                         setObjectFit(nextFit);
-                        localStorage.setItem(keys.fit, nextFit);
+                        saveToFirestore({ objectFit: nextFit });
                     }} className="p-1.5 text-white hover:text-[#A08E7B] transition">
                         {objectFit === 'cover' ? <Minimize size={14} /> : <Maximize size={14} />}
                     </button>
                     <div className="w-px bg-white/20 mx-1"></div>
                 </>
                 )}
-                <button onClick={() => { setObjectPosition('top'); localStorage.setItem(keys.objpos, 'top'); }} className={`p-1.5 transition ${objectPosition === 'top' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><ArrowUp size={14} /></button>
-                <button onClick={() => { setObjectPosition('center'); localStorage.setItem(keys.objpos, 'center'); }} className={`p-1.5 transition ${objectPosition === 'center' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><AlignCenter size={14} /></button>
-                <button onClick={() => { setObjectPosition('bottom'); localStorage.setItem(keys.objpos, 'bottom'); }} className={`p-1.5 transition ${objectPosition === 'bottom' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><ArrowDown size={14} /></button>
+                <button onClick={() => { setObjectPosition('top'); saveToFirestore({ objectPosition: 'top' }); }} className={`p-1.5 transition ${objectPosition === 'top' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><ArrowUp size={14} /></button>
+                <button onClick={() => { setObjectPosition('center'); saveToFirestore({ objectPosition: 'center' }); }} className={`p-1.5 transition ${objectPosition === 'center' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><AlignCenter size={14} /></button>
+                <button onClick={() => { setObjectPosition('bottom'); saveToFirestore({ objectPosition: 'bottom' }); }} className={`p-1.5 transition ${objectPosition === 'bottom' ? 'text-[#A08E7B]' : 'text-white hover:text-[#A08E7B]'}`}><ArrowDown size={14} /></button>
             </div>
 
             <input type="file" multiple ref={fileInputRef} className="hidden" accept="image/*,video/*" onChange={handleFileChange} />
